@@ -1,9 +1,9 @@
 /*
 ==============================================================================
- PROGRAMA: Robot Auto-balanceado (VERSIÓN LIMPIA - LIBRERÍAS)
+ PROGRAMA: Robot Auto-balanceado (VERSIÓN ADAPTADA PARA MATRICES EN MATLAB)
  DESCRIPCIÓN: Control PID de equilibrio, velocidad y giro.
-              - Eliminado: Bluetooth, Ultrasónico, LEDs, Buzzer.
-              - Todo el control se ejecuta en la interrupción de 5ms.
+              - Configurado a 115200 baudios para streaming de alta velocidad.
+              - Envía PWM, Ángulo, Giro y Velocidad de Encoders cada 5ms.
 ==============================================================================
 */
 
@@ -45,12 +45,14 @@ float Q_angle = 0.001, Q_gyro = 0.005;
 float R_angle = 0.5, C_0 = 1;
 float timeChange = 5; // Intervalo en ms
 float dt = timeChange * 0.001;
-float K1 = 0.05; // Peso del acelerómetro
+float K1 = 0.05;
+
+// Peso del acelerómetro
 float angle0 = 1.0; // Ángulo mecánico de equilibrio (Cero)
 
-// -------------- PARÁMETROS PID (MODIFICA ESTOS PARA AFINAR) --------------
+// -------------- PARÁMETROS PID ORIGINALES --------------
 // 1. PID de Ángulo (Equilibrio principal)
-double kp = 40, ki = 0.0, kd = 0.58;
+double kp = 45.0, ki = 0.0, kd = 0.58;
 
 // 2. PID de Velocidad (Evita que el coche se desplace sin control)
 double kp_speed = 4, ki_speed = 0.1058, kd_speed = 0.0;
@@ -84,10 +86,9 @@ void setup()
     Pin_Init();
     
     Wire.begin();
-    Serial.begin(9600);
-    
+    Serial.begin(115200); // <-- Velocidad ultra-rápida requerida para MATLAB (115200)
     mpu.initialize();
-    delay(1500); // Esperar a que el giroscopio se estabilice
+    delay(1500); // Esperar a que el giroscopio se estabilice al encender
     
     balancecar.pwm1 = 0;
     balancecar.pwm2 = 0;
@@ -103,13 +104,12 @@ void setup()
 
 
 /*********************************************************
- * LOOP PRINCIPAL
- * Queda vacío. Todo el procesamiento se hace en la 
- * interrupción Timer2Isr para garantizar el tiempo exacto.
+ * LOOP PRINCIPAL: Libre para no interrumpir los procesos
  *********************************************************/
 void loop()
 {
-    // Puedes poner un Serial.print aquí si necesitas monitorear algo en la PC
+    // El loop se deja vacío intencionalmente. 
+    // Todo el control y envío de datos se ejecuta por hardware en el Timer2.
 }
 
 
@@ -149,6 +149,15 @@ void Timer2Isr()
 
     // --- CAPA 5: SALIDA PWM A LOS MOTORES ---
     balancecar.pwma(Outputs, turnoutput, kalmanfilter.angle, kalmanfilter.angle6, turnl, turnr, spinl, spinr, front, back, kalmanfilter.accelz, TB6612_AIN1, TB6612_AIN2, TB6612_BIN1, TB6612_BIN2, TB6612_PWMA, TB6612_PWMB);
+
+    // ====================================================================
+    // STREAMING DE DATOS PARA TRANSMISIÓN A MATLAB (Cada 5 milisegundos)
+    // Formato enviado: Entrada_PWM,Angulo,Velocidad_Angular,Velocidad_Lineal
+    // ====================================================================
+    Serial.print(Outputs);                Serial.print(",");
+    Serial.print(kalmanfilter.angle);     Serial.print(",");
+    Serial.print(kalmanfilter.Gyro_x);    Serial.print(",");
+    Serial.println(sumam); // Representa la velocidad acumulada por los encoders
 }
 
 
@@ -159,7 +168,6 @@ void Timer2Isr()
 // Función PD para el ángulo
 void angleout()
 {
-    // Calcula la fuerza necesaria usando Proporcional (Ángulo) y Derivativo (Velocidad de caída)
     balancecar.angleoutput = kp * (kalmanfilter.angle + angle0) + kd * kalmanfilter.Gyro_x;
 }
 
@@ -176,7 +184,6 @@ void countpluse()
     count_left = 0;
     count_right = 0;
 
-    // Corrección de dirección de los pulsos según el sentido de giro (PWM)
     if ((balancecar.pwm1 < 0) && (balancecar.pwm2 < 0)) {
         rpluse = -rpluse;
         lpluse = -lpluse;
@@ -191,14 +198,11 @@ void countpluse()
         lpluse = lpluse;
     }
 
-    // Detección de "coche levantado" para apagar motores
     balancecar.stopr += rpluse;
     balancecar.stopl += lpluse;
 
-    // Acumulación para el PID de velocidad
     balancecar.pulseright += rpluse;
     balancecar.pulseleft += lpluse;
-    
     sumam = (balancecar.pulseright + balancecar.pulseleft) * 4;
 }
 
@@ -241,7 +245,3 @@ void attachPinChangeInterrupt(int pin)
     PCICR |= bit(PCIE2);
     sei();
 }
-
-
-
-
